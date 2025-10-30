@@ -1,12 +1,11 @@
 import 'package:auto_size_text/auto_size_text.dart';
-import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:mycoinpoll_metamask/application/presentation/models/eCommerce_model.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web3dart/web3dart.dart';
+
 import '../../../../framework/components/AddressFieldComponent.dart';
 import '../../../../framework/components/BlockButton.dart';
 import '../../../../framework/components/InfoCard.dart';
@@ -26,7 +25,6 @@ import '../../models/token_model.dart';
 import '../../viewmodel/countdown_provider.dart';
 import '../../viewmodel/wallet_view_model.dart';
 
-
 class ViewTokenScreen extends StatefulWidget {
   const ViewTokenScreen({super.key});
 
@@ -34,8 +32,8 @@ class ViewTokenScreen extends StatefulWidget {
   State<ViewTokenScreen> createState() => _ViewTokenScreenState();
 }
 
-class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObserver {
-
+class _ViewTokenScreenState extends State<ViewTokenScreen>
+    with WidgetsBindingObserver {
   String selectedBadge = 'AIRDROP';
   late Future<TokenDetails> _tokenDetailsFuture;
 
@@ -45,17 +43,15 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
     });
   }
 
-
   final ethController = TextEditingController();
   final ecmController = TextEditingController();
   final readingMoreController = TextEditingController();
   final referredController = TextEditingController();
-  final String defaultReferrerAddress = '0x0000000000000000000000000000000000000000';
+  final String defaultReferrerAddress =
+      '0x0000000000000000000000000000000000000000';
   bool _isUpdating = false;
 
-
-  double _ethPrice = 0.0;
-
+  // double _ethPrice = 0.0;
 
   bool isDisconnecting = false;
 
@@ -64,6 +60,10 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
 
   String _referredByAddress = '';
   bool _isReferredByLoading = false;
+
+  bool _isCheckingLocation = false;
+  bool _isLocationAllowed = true;
+  String _locationMessage = '';
 
   @override
   void initState() {
@@ -74,11 +74,45 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
     fetchTokens();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-
+      final walletVM = Provider.of<WalletViewModel>(context, listen: false);
+      await walletVM.ensureModalWithValidContext(context);
+      await walletVM.rehydrate();
+      await _initializeWalletData();
       await _fetchReferredByAddress();
+      await _fetchReferredByAddress();
+      await _checkGeolocation();
+    });
+  }
+
+  Future<void> _checkGeolocation() async {
+    setState(() {
+      _isCheckingLocation = true;
     });
 
+    try {
+      final geoData = await ApiService().checkGeolocation();
+      final bool isShow = geoData['is_show'] ?? true;
+      final String message = geoData['message'] ?? '';
+      final String country = geoData['country'] ?? 'Unknown';
+
+      setState(() {
+        _isLocationAllowed = isShow;
+        _locationMessage =
+            message.isNotEmpty ? message : 'Service not available in $country';
+      });
+    } catch (e) {
+      // If API fails, allow purchase (fail-safe)
+      setState(() {
+        _isLocationAllowed = true;
+        _locationMessage = '';
+      });
+    } finally {
+      setState(() {
+        _isCheckingLocation = false;
+      });
+    }
   }
+
   Future<void> fetchTokens() async {
     try {
       final response = await ApiService().fetchTokens();
@@ -91,6 +125,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
       setState(() => isLoading = false);
     }
   }
+
   Future<void> _fetchReferredByAddress() async {
     setState(() {
       _isReferredByLoading = true;
@@ -106,7 +141,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
         _referredByAddress = 'Error fetching referral address';
       });
       print('Error fetching referral address: $e');
-    }finally{
+    } finally {
       setState(() {
         _isReferredByLoading = false;
       });
@@ -115,26 +150,12 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
 
   Future<void> _initializeWalletData() async {
     final walletVM = Provider.of<WalletViewModel>(context, listen: false);
-    await walletVM.init(context);
-    try {
-
-      final ethPrice = walletVM.ethPrice;
-
-      setState(() {
-
-        _ethPrice = ethPrice;
-
-      });
-
-    } catch (e) {
-      if (mounted) {
-        ToastMessage.show(
-          message: "Please connect your wallet",
-          type: MessageType.error,
-        );
-
-      }
+    if (walletVM.isConnected) {
+      await walletVM.fetchConnectedWalletData(isReconnecting: true);
     }
+    await walletVM.fetchLatestETHPrice();
+    _updateECMFromEth();
+    _updateEthFromECM();
   }
 
   void _updateEthFromECM() {
@@ -142,272 +163,304 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
     _isUpdating = true;
 
     final ecmAmount = double.tryParse(ecmController.text) ?? 0.0;
-    if (ecmAmount == null || ecmAmount == 0.0) {
+    if (ecmAmount <= 0) {
       ethController.clear();
       _isUpdating = false;
       return;
     }
 
-
-
     final walletVM = Provider.of<WalletViewModel>(context, listen: false);
-    final ethAmount = ecmAmount * walletVM.ethPrice;
 
-    ethController.text = ethAmount.toStringAsFixed(6);
+    // Use the new conversion method
+    final ethAmountInWei = walletVM.convertECMtoWei(ecmAmount);
+    if (ethAmountInWei != null) {
+      final ethAmount = ethAmountInWei / BigInt.from(10).pow(18);
+      ethController.text = ethAmount.toStringAsFixed(6);
+    } else {
+      ethController.clear();
+    }
 
     _isUpdating = false;
   }
+
   void _updateECMFromEth() {
     if (_isUpdating) return;
     _isUpdating = true;
 
     final ethAmount = double.tryParse(ethController.text) ?? 0.0;
-    if (ethAmount == null || ethAmount == 0.0) {
+
+    if (ethAmount <= 0) {
       ecmController.clear();
       _isUpdating = false;
       return;
     }
+
     final walletVM = Provider.of<WalletViewModel>(context, listen: false);
+
     if (walletVM.ethPrice > 0) {
       final ecmAmount = ethAmount / walletVM.ethPrice;
       ecmController.text = ecmAmount.toStringAsFixed(6);
+      // ecmController.text = ecmAmount.toStringAsFixed(1);
+    } else {
+      ecmController.clear();
     }
+
     _isUpdating = false;
   }
 
+  Future<void> _refreshData() async {
+    final walletVM = Provider.of<WalletViewModel>(context, listen: false);
+    await walletVM.ensureModalWithValidContext(context);
+
+    if (!walletVM.isConnected) {
+      await walletVM.init(context);
+    }
+
+    await Future.wait([
+      walletVM.fetchLatestETHPrice(),
+      fetchTokens(),
+      _fetchReferredByAddress(),
+      if (walletVM.isConnected)
+        walletVM.fetchConnectedWalletData(isReconnecting: true),
+    ]);
+    _updateEthFromECM();
+    _updateECMFromEth();
+  }
 
   @override
   void dispose() {
-     ecmController.dispose();
-     ethController.dispose();
-     ecmController.removeListener(_updateEthFromECM);
-     ethController.removeListener(_updateECMFromEth);
-     readingMoreController.dispose();
+    ecmController.dispose();
+    ethController.dispose();
+    ecmController.removeListener(_updateEthFromECM);
+    ethController.removeListener(_updateECMFromEth);
+    readingMoreController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
-      print("App resumed from background, refreshing wallet data.");
-      _initializeWalletData();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-
-
-
     double screenWidth = MediaQuery.of(context).size.width;
     double screenHeight = MediaQuery.of(context).size.height;
     final isPortrait = screenHeight > screenWidth;
     final baseSize = isPortrait ? screenWidth : screenHeight;
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
-        child: Container(
-          width: screenWidth,
-          height: screenHeight,
-          decoration: const BoxDecoration(
-            color: Color(0xFF01090B),
-            image: DecorationImage(
-              image: AssetImage('assets/images/starGradientBg.png'),
-              fit: BoxFit.cover,
-              alignment: Alignment.topRight,
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-          child: Column(
-
-            children: [
-              // SizedBox(height: screenHeight * 0.01),
-
-              ///Back Button
-              Align(
-                alignment: Alignment.topLeft,
-                child: IconButton(
-                  icon: SvgPicture.asset(
-                    'assets/icons/back_button.svg',
-                    color: Colors.white,
-                    width: screenWidth * 0.04,
-                    height: screenWidth * 0.04,
-                  ),
-                  onPressed: () => Navigator.pop(context),
-                ),
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+      },
+      behavior: HitTestBehavior.translucent,
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: Container(
+            width: screenWidth,
+            height: screenHeight,
+            decoration: const BoxDecoration(
+              color: Color(0xFF01090B),
+              image: DecorationImage(
+                image: AssetImage('assets/images/starGradientBg.png'),
+                fit: BoxFit.cover,
+                alignment: Alignment.topRight,
+                filterQuality: FilterQuality.medium,
               ),
-              /// Main Scrollable Content
-              isLoading || tokens.isEmpty ? const Center(child: CircularProgressIndicator(color: Colors.white,)) :
-              Expanded(
-                child: Padding(
+            ),
+            child: Column(
+              children: [
+                // SizedBox(height: screenHeight * 0.01),
 
-                  padding: EdgeInsets.symmetric(
-                    horizontal: screenWidth * 0.02,
-                    vertical: screenHeight * 0.02,
+                ///Back Button
+                Align(
+                  alignment: Alignment.topLeft,
+                  child: IconButton(
+                    icon: SvgPicture.asset(
+                      'assets/icons/back_button.svg',
+                      color: Colors.white,
+                      width: screenWidth * 0.04,
+                      height: screenWidth * 0.04,
+                    ),
+                    onPressed: () => Navigator.pop(context),
                   ),
-                  child: ScrollConfiguration(
-                    behavior: const ScrollBehavior().copyWith(overscroll: false),
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.max,
-                        children:  [
+                ),
 
-
-                          /// White Paper Section
-                            ...tokens.map((token) => _buildTokenCard(context, token)).toList(),
-
-                          SizedBox(height: screenHeight * 0.04),
-
-
-                          /// Buy ECM section
-                          _buildBuyEcmSection(),
-
-                          SizedBox(height: screenHeight * 0.04),
-
-                          InfoCard(
-                            label1: tokens.first.symbol,
-                            label2: tokens.first.fullName,
-                            description: tokens.first.description
-                                .replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), '')
-                                .trim(),
-                             imagePath: tokens.first.logo,
-                            backgroundImagePath: 'assets/images/bg.png',
-                            width: screenWidth ,
+                /// Main Scrollable Content
+                isLoading || tokens.isEmpty
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                        color: Colors.white,
+                      ))
+                    : Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: screenWidth * 0.02,
+                            vertical: screenHeight * 0.02,
                           ),
+                          child: RefreshIndicator(
+                            onRefresh: _refreshData,
+                            child: ScrollConfiguration(
+                              behavior: const ScrollBehavior()
+                                  .copyWith(overscroll: false),
+                              child: SingleChildScrollView(
+                                keyboardDismissBehavior:
+                                    ScrollViewKeyboardDismissBehavior.onDrag,
+                                physics: const BouncingScrollPhysics(),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.max,
+                                  children: [
+                                    /// White Paper Section
+                                    ...tokens
+                                        .map((token) =>
+                                            _buildTokenCard(context, token))
+                                        .toList(),
 
-                          /// Submit & Clear Button Section
+                                    SizedBox(height: screenHeight * 0.04),
 
-                          SizedBox(height: screenHeight * 0.04),
+                                    /// Buy ECM section
+                                    _buildBuyEcmSection(),
 
-                          InfoCard(
-                            label1: tokens.first.tokenCompany,
-                            label2: 'Founder',
-                            description: tokens.first.companyDetails,
-                            imagePath: tokens.first.companyLogo,
+                                    SizedBox(height: screenHeight * 0.04),
 
-                            width: screenWidth ,
-                          ),
-
-                          SizedBox(height: screenHeight * 0.04),
-
-                          _strategicTokenSection(tokens.first),
-
-
-
-
-
-                          Center(
-                            child: Container(
-                                width: screenWidth * 0.82,
-                                height: screenHeight * 0.19,
-                                decoration: const BoxDecoration(
-                                  image: DecorationImage(
-                                    image: AssetImage('assets/images/discoverIMG2.png'),
-                                    fit: BoxFit.fitWidth,
-                                    filterQuality: FilterQuality.medium,
-
-                                  ),
-                                ),
-                                child: Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Padding(
-                                    padding: EdgeInsets.fromLTRB( 0,0, screenWidth * 0.070,0),
-                                    child:  Row(
-                                      mainAxisAlignment: MainAxisAlignment.start,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        SizedBox(width: screenWidth * 0.03),
-
-                                        Image.asset(
-                                          // 'assets/images/discoverIMG.png',
-                                          'assets/images/ecmLarge.png',
-                                          fit: BoxFit.contain,
-                                          width: screenWidth * 0.17,
-                                        ),
-
-                                        SizedBox(width: screenWidth * 0.01),
-                                        Flexible(
-                                          child: AutoSizeText(
-                                            "Discover Our Visionary Roadmap",
-                                            textAlign: TextAlign.left,
-                                            maxLines: 2,
-
-                                            style:  TextStyle(
-                                              color: Colors.white,
-                                              fontFamily: 'Poppins',
-                                              fontWeight: FontWeight.w500,
-                                              height: 1.3,
-                                              // fontSize: baseSize * 0.036,
-                                              fontSize: baseSize * 0.045,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+                                    InfoCard(
+                                      label1: tokens.first.symbol,
+                                      label2: tokens.first.fullName,
+                                      description: tokens.first.description
+                                          .replaceAll(
+                                              RegExp(r'<[^>]*>|&[^;]+;'), '')
+                                          .trim(),
+                                      imagePath: tokens.first.logo,
+                                      backgroundImagePath:
+                                          'assets/images/bg.png',
+                                      width: screenWidth,
                                     ),
 
-                                  ),
-                                )
+                                    /// Submit & Clear Button Section
+
+                                    SizedBox(height: screenHeight * 0.04),
+
+                                    InfoCard(
+                                      label1: tokens.first.tokenCompany,
+                                      label2: 'Founder',
+                                      description: tokens.first.companyDetails,
+                                      imagePath: tokens.first.companyLogo,
+                                      width: screenWidth,
+                                    ),
+
+                                    SizedBox(height: screenHeight * 0.04),
+
+                                    _strategicTokenSection(tokens.first),
+
+                                    Center(
+                                      child: Container(
+                                          width: screenWidth * 0.82,
+                                          height: screenHeight * 0.19,
+                                          decoration: const BoxDecoration(
+                                            image: DecorationImage(
+                                              image: AssetImage(
+                                                  'assets/images/discoverIMG2.png'),
+                                              fit: BoxFit.fitWidth,
+                                              filterQuality:
+                                                  FilterQuality.medium,
+                                            ),
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.centerRight,
+                                            child: Padding(
+                                              padding: EdgeInsets.fromLTRB(
+                                                  0, 0, screenWidth * 0.070, 0),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.center,
+                                                children: [
+                                                  SizedBox(
+                                                      width:
+                                                          screenWidth * 0.03),
+                                                  Image.asset(
+                                                    // 'assets/images/discoverIMG.png',
+                                                    'assets/images/ecmLarge.png',
+                                                    fit: BoxFit.contain,
+                                                    width: screenWidth * 0.17,
+                                                  ),
+                                                  SizedBox(
+                                                      width:
+                                                          screenWidth * 0.01),
+                                                  Flexible(
+                                                    child: AutoSizeText(
+                                                      "Discover Our Visionary Roadmap",
+                                                      textAlign: TextAlign.left,
+                                                      maxLines: 2,
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontFamily: 'Poppins',
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                        height: 1.3,
+                                                        // fontSize: baseSize * 0.036,
+                                                        fontSize:
+                                                            baseSize * 0.045,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          )),
+                                    ),
+
+                                    SizedBox(height: screenHeight * 0.09),
+
+                                    /// Road Map Component Functionalities
+
+                                    FutureBuilder<TokenDetails>(
+                                        future: _tokenDetailsFuture,
+                                        builder: (context, snapshot) {
+                                          if (snapshot.connectionState ==
+                                              ConnectionState.waiting) {
+                                            return CircularProgressIndicator();
+                                          } else if (snapshot.hasError) {
+                                            return Text(
+                                                'Error: ${snapshot.error}');
+                                          } else {
+                                            final tokenDetails = snapshot.data!;
+                                            return SizedBox(
+                                              width: double.infinity,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 16),
+                                                    child: buildRoadmapSection(
+                                                        context,
+                                                        screenHeight,
+                                                        tokenDetails),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }
+                                        }),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
-
-
-                          SizedBox(height: screenHeight * 0.09),
-
-                          /// Road Map Component Functionalities
-
-                          FutureBuilder<TokenDetails>(
-                            future: _tokenDetailsFuture,
-                            builder: (context, snapshot){
-                              if(snapshot.connectionState == ConnectionState.waiting){
-                                return CircularProgressIndicator();
-                              }else if(snapshot.hasError){
-                                return Text('Error: ${snapshot.error}');
-                              }else{
-                                final tokenDetails = snapshot.data!;
-                               return SizedBox(
-                                  width: double.infinity,
-
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.start,
-
-                                    children: [
-
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                                        child: buildRoadmapSection(context, screenHeight,tokenDetails),
-                                      ),
-
-                                    ],
-                                  ),
-                                );
-                              }
-
-                            }
-
-                          ),
-
-
-
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
-
 
   /// White Paper section With timer
   Widget _buildTokenCard(BuildContext context, TokenModel token) {
@@ -426,11 +479,10 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
           /// Token Card
           Container(
             width: screenWidth,
-            decoration:const BoxDecoration(
+            decoration: const BoxDecoration(
               image: DecorationImage(
                 image: AssetImage('assets/images/viewTokenFrameBg.png'),
                 fit: BoxFit.fill,
@@ -440,7 +492,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
               padding: EdgeInsets.all(baseSize * 0.025),
               child: Column(
                 children: [
-
                   /// Image and Info
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -448,7 +499,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                       /// Token image with badges
                       Stack(
                         children: [
-
                           ClipRRect(
                             child: Image.network(
                               token.featureImage,
@@ -458,8 +508,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                               filterQuality: FilterQuality.high,
                             ),
                           ),
-
-
                           Positioned(
                             top: screenHeight * 0.01,
                             left: screenWidth * 0.02,
@@ -468,7 +516,8 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                               children: token.tags.map((tag) {
                                 final normalizedTag = tag.toUpperCase();
                                 return Padding(
-                                  padding: EdgeInsets.only(right: screenWidth * 0.01),
+                                  padding: EdgeInsets.only(
+                                      right: screenWidth * 0.01),
                                   child: BadgeComponent(
                                     text: normalizedTag,
                                     isSelected: selectedBadge == normalizedTag,
@@ -476,13 +525,10 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                                   ),
                                 );
                               }).toList(),
-
                             ),
                           ),
-
                         ],
                       ),
-
 
                       SizedBox(width: baseSize * 0.02),
 
@@ -521,12 +567,16 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
 
                             /// Timer Section
 
-                            if (tokens.isNotEmpty && tokens.first.stageStatus) ...[
+                            if (tokens.isNotEmpty &&
+                                tokens.first.stageStatus) ...[
                               Padding(
-                                padding: EdgeInsets.symmetric(horizontal: baseSize * 0.01, vertical: baseSize * 0.01),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: baseSize * 0.01,
+                                    vertical: baseSize * 0.01),
                                 child: ChangeNotifierProvider(
                                   create: (_) => CountdownTimerProvider(
-                                    targetDateTime: DateTime.parse(tokens.first.stageDate),
+                                    targetDateTime:
+                                        DateTime.parse(tokens.first.stageDate),
                                   ),
                                   child: CountdownTimer(
                                     scaleWidth: scaleWidth,
@@ -536,7 +586,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                                 ),
                               ),
                             ]
-
                           ],
                         ),
                       ),
@@ -556,7 +605,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                           fontWeight: FontWeight.w400,
                           // fontSize: baseSize * 0.025,
                           fontSize: getResponsiveFontSize(context, 12),
-                          height : 1.6,
+                          height: 1.6,
 
                           color: const Color(0xffFFF5ED),
                         ),
@@ -574,7 +623,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                               // fontSize: baseSize * 0.025,
                               fontSize: getResponsiveFontSize(context, 12),
 
-                              height : 1.6,
+                              height: 1.6,
 
                               color: const Color(0xffFFF5ED),
                             ),
@@ -588,7 +637,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                               // fontSize: baseSize * 0.025,
                               fontSize: getResponsiveFontSize(context, 12),
 
-                              height : 1.6,
+                              height: 1.6,
 
                               color: const Color(0xffFFF5ED),
                             ),
@@ -620,15 +669,16 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                           mainAxisAlignment: MainAxisAlignment.start,
                           children: [
                             // SizedBox(width: baseSize * 0.02),
-                            if (token.socialMedia?.twitter != null && token.socialMedia!.twitter!.isNotEmpty)
+                            if (token.socialMedia?.twitter != null &&
+                                token.socialMedia!.twitter!.isNotEmpty)
                               _imageButton(
                                 context,
                                 'assets/icons/xIcon.svg',
                                 token.socialMedia!.twitter!,
-
                               ),
                             SizedBox(width: baseSize * 0.02),
-                            if (token.socialMedia?.telegram != null && token.socialMedia!.telegram!.isNotEmpty)
+                            if (token.socialMedia?.telegram != null &&
+                                token.socialMedia!.telegram!.isNotEmpty)
                               _imageButton(
                                 context,
                                 'assets/icons/teleImage.svg',
@@ -651,19 +701,17 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                           Color(0xFF2680EF),
                           Color(0xFF1CD494),
                         ],
-
                         onTap: () async {
                           await DownloadService.downloadWhitepaperPdf(context);
-
                         },
                       ),
-
                       BlockButtonV2(
                         text: 'Official Website',
-                        onPressed: () async{
+                        onPressed: () async {
                           const url = 'https://ecmcoin.com/';
                           if (await canLaunchUrl(Uri.parse(url))) {
-                            await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                            await launchUrl(Uri.parse(url),
+                                mode: LaunchMode.externalApplication);
                           } else {
                             debugPrint('Could not launch $url');
                           }
@@ -676,7 +724,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                         width: screenWidth * 0.3,
                         height: screenHeight * 0.04,
                       ),
-
                     ],
                   ),
                 ],
@@ -689,7 +736,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
   }
 
   /// _imageButton Widget
-  Widget _imageButton(BuildContext context, String imagePath,  String url) {
+  Widget _imageButton(BuildContext context, String imagePath, String url) {
     final screenWidth = MediaQuery.of(context).size.width;
     final imageSize = screenWidth * 0.04; // 5% of screen width
 
@@ -718,20 +765,19 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
         padding: const EdgeInsets.all(8),
         child: isSvg
             ? SvgPicture.asset(
-          imagePath,
-          width: imageSize,
-          height: imageSize,
-          color: Colors.white,
-        )
+                imagePath,
+                width: imageSize,
+                height: imageSize,
+                color: Colors.white,
+              )
             : Image.asset(
-          imagePath,
-          width: imageSize,
-          height: imageSize,
-          color: Colors.white,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.medium,
-
-        ),
+                imagePath,
+                width: imageSize,
+                height: imageSize,
+                color: Colors.white,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.medium,
+              ),
       ),
     );
   }
@@ -741,7 +787,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
     final double screenWidth = MediaQuery.of(context).size.width;
     final double screenHeight = MediaQuery.of(context).size.height;
 
-    return  Padding(
+    return Padding(
       padding: const EdgeInsets.all(2.0),
       child: Column(
         children: [
@@ -766,17 +812,15 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
             child: Container(
               width: screenWidth,
               decoration: BoxDecoration(
-                border: Border.all(
-                    color: Colors.transparent
-                ),
-                image:const DecorationImage(
+                border: Border.all(color: Colors.transparent),
+                image: const DecorationImage(
                   image: AssetImage('assets/images/buyEcmContainerImageV.png'),
                   fit: BoxFit.fill,
                   filterQuality: FilterQuality.low,
                 ),
               ),
-              child: Consumer<WalletViewModel>(builder: (context, walletVM, child) {
-
+              child: Consumer<WalletViewModel>(
+                  builder: (context, walletVM, child) {
                 return Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -784,7 +828,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                     const SizedBox(height: 18),
 
                     /// Address Section
-                    if (walletVM.isConnected)...[
+                    if (walletVM.isConnected) ...[
                       SizedBox(
                         width: screenWidth * 0.9,
                         child: const Divider(
@@ -798,25 +842,26 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-
                             CustomLabeledInputField(
                               labelText: 'Your Address:',
-                              hintText: walletVM.isConnected && walletVM.walletAddress.isNotEmpty
+                              hintText: walletVM.isConnected &&
+                                      walletVM.walletAddress.isNotEmpty
                                   ? walletVM.walletAddress
                                   : 'Not connected',
                               controller: readingMoreController,
                               isReadOnly: true,
                             ),
                             SizedBox(height: screenHeight * 0.02),
-
                             CustomLabeledInputField(
                               labelText: 'Referred By:',
-                              hintText: _isReferredByLoading ?'Loading...'
-                                  : (_referredByAddress.isNotEmpty ? _referredByAddress : 'Not found'),
+                              hintText: _isReferredByLoading
+                                  ? 'Loading...'
+                                  : (_referredByAddress.isNotEmpty
+                                      ? _referredByAddress
+                                      : 'Not found'),
                               controller: referredController,
                               isReadOnly: false,
                             ),
-
                           ],
                         ),
                       ),
@@ -829,13 +874,14 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                         ),
                       ),
                     ],
+
                     ///Action Buttons
                     const SizedBox(height: 5),
                     Text(
                       walletVM.ethPrice > 0
                           ? "1 ECM = ${walletVM.ethPrice.toStringAsFixed(6)} ETH"
                           : "Loading...",
-                      style:  TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
                         fontSize: getResponsiveFontSize(context, 13),
                         fontWeight: FontWeight.w400,
@@ -846,78 +892,125 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
 
                     const SizedBox(height: 18),
 
-
                     /// ECm AMount INput Section
                     CustomInputField(
                       hintText: 'ECM',
                       iconAssetPath: 'assets/images/ecm.png',
                       controller: ecmController,
                       // inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),],
-                      inputFormatters: [DecimalTextInputFormatter(),],
-
+                      inputFormatters: [
+                        DecimalTextInputFormatter(),
+                      ],
                     ),
 
                     const SizedBox(height: 12),
                     CustomInputField(
-                      hintText:'ETH ',
-                      iconAssetPath:'assets/images/eth.png',
+                      hintText: 'ETH ',
+                      iconAssetPath: 'assets/images/eth.png',
                       controller: ethController,
                       // inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),],
-                      inputFormatters: [DecimalTextInputFormatter(),],
-
+                      inputFormatters: [
+                        DecimalTextInputFormatter(),
+                      ],
                     ),
 
                     const SizedBox(height: 18),
+
                     CustomGradientButton(
-                      label: 'Buy ECM',
+                      // label: 'Buy ECM',
+                      label: _isLocationAllowed
+                          ? 'Buy ECM'
+                          : (_locationMessage.isNotEmpty)
+                              ? _locationMessage
+                              : 'Loading...',
                       width: MediaQuery.of(context).size.width * 0.7,
                       height: MediaQuery.of(context).size.height * 0.05,
                       leadingImagePath: 'assets/icons/buyEcmLeadingImg.svg',
                       onTap: () async {
-                        final walletVM = Provider.of<WalletViewModel>(context, listen: false);
+                        if (!_isLocationAllowed) {
+                          ToastMessage.show(
+                            message: _locationMessage.isNotEmpty
+                                ? _locationMessage
+                                : "ECM purchase is not available in your region",
+                            subtitle: "Service Not Available",
+                            type: MessageType.info,
+                            duration: CustomToastLength.LONG,
+                            gravity: CustomToastGravity.BOTTOM,
+                          );
+                          return;
+                        }
+
+                        final walletVM = Provider.of<WalletViewModel>(context,
+                            listen: false);
+
                         if (!walletVM.isConnected) {
                           await walletVM.ensureModalWithValidContext(context);
                           final ok = await walletVM.connectWallet(context);
-                          if (!ok) return;
+                          if (ok) return;
                         }
+                        final ecmAmount =
+                            double.tryParse(ecmController.text.trim());
+                        if (ecmAmount == null || ecmAmount <= 0) {
+                          ToastMessage.show(
+                            message: "Invalid Amount",
+                            subtitle: "Please enter a valid ECM amount.",
+                            type: MessageType.info,
+                            duration: CustomToastLength.SHORT,
+                            gravity: CustomToastGravity.BOTTOM,
+                          );
+                          return;
+                        }
+                        if (!walletVM.isValidECMAmount(ecmAmount)) {
+                          ToastMessage.show(
+                            message: "Minimum Amount Required",
+                            subtitle:
+                                "Minimum 50 ECM tokens per purchase required.",
+                            type: MessageType.info,
+                            duration: CustomToastLength.SHORT,
+                            gravity: CustomToastGravity.BOTTOM,
+                          );
+                          return;
+                        }
+
                         try {
-                          final ecmAmount = double.tryParse(ecmController.text.trim());
-                          if (ecmAmount == null || ecmAmount <= 0) {
+                          final ethAmountInWei =
+                              walletVM.convertECMtoWei(ecmAmount);
+                          if (ethAmountInWei == null) {
                             ToastMessage.show(
-                              message: "Invalid Amount",
-                              subtitle: "Please enter a valid ECM amount.",
-                              type: MessageType.info,
+                              message: "Conversion Error",
+                              subtitle:
+                                  "Failed to calculate ETH amount. Please try again.",
+                              type: MessageType.error,
                               duration: CustomToastLength.SHORT,
                               gravity: CustomToastGravity.BOTTOM,
                             );
                             return;
                           }
 
-                          final ethPricePerECM = walletVM.ethPrice;
-                          final requiredEth = Decimal.parse(ecmAmount.toString()) * Decimal.parse(ethPricePerECM.toString());
-                          final ethAmountInWei = EtherAmount.fromBigInt(
-                            EtherUnit.wei,
-                            (requiredEth * Decimal.parse('1e18')).toBigInt(),
-                          );
-
+                          // Convert BigInt to EtherAmount
+                          final ethAmount = EtherAmount.fromBigInt(
+                              EtherUnit.wei, ethAmountInWei);
 
                           showDialog(
                             context: context,
                             barrierDismissible: false,
                             builder: (_) => const Center(
-                              child: CircularProgressIndicator(color: Colors.white),
+                              child: CircularProgressIndicator(
+                                  color: Colors.white),
                             ),
                           );
 
                           final referralInput = referredController.text.trim();
+
                           final referralAddress = referralInput.isNotEmpty &&
-                              EthereumAddress.fromHex(referralInput).hex != defaultReferrerAddress
+                                  EthereumAddress.fromHex(referralInput).hex !=
+                                      defaultReferrerAddress
                               ? EthereumAddress.fromHex(referralInput)
                               : EthereumAddress.fromHex(defaultReferrerAddress);
 
-
                           final txHash = await walletVM.buyECMWithETH(
-                            ethAmount: ethAmountInWei,
+                            // ethAmount: ethAmountInWei,
+                            ethAmount: ethAmount,
                             referralAddress: referralAddress,
                             context: context,
                           );
@@ -935,21 +1028,17 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                           }
                         } catch (e) {
                           Navigator.of(context).pop();
-
                         }
                       },
-                      gradientColors: const [
-                        Color(0xFF2D8EFF),
-                        Color(0xFF2EE4A4)
-                      ],
+                      gradientColors: _isLocationAllowed
+                          ? const [Color(0xFF2D8EFF), Color(0xFF2EE4A4)]
+                          : const [Colors.white38, Colors.white38],
                     ),
+
                     const SizedBox(height: 18),
-
-
                   ],
                 );
-              }
-              ),
+              }),
             ),
           ),
         ],
@@ -957,10 +1046,8 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
     );
   }
 
-
-
   /// Strategic Token Section
-  Widget _strategicTokenSection(TokenModel token){
+  Widget _strategicTokenSection(TokenModel token) {
     final Size screenSize = MediaQuery.of(context).size;
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
@@ -991,7 +1078,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
             ],
           ),
           SizedBox(height: screenHeight * 0.02),
-
           Container(
             width: double.infinity,
             padding: EdgeInsets.symmetric(
@@ -1003,7 +1089,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                 image: AssetImage('assets/images/gradientImg.png'),
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.medium,
-
               ),
               border: Border.all(width: 0.5, color: const Color(0xFF2B2D40)),
               borderRadius: BorderRadius.circular(screenWidth * 0.02),
@@ -1036,7 +1121,8 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                           Align(
                             alignment: Alignment.topRight,
                             child: ClipRRect(
-                              borderRadius: BorderRadius.circular(screenWidth * 0.02),
+                              borderRadius:
+                                  BorderRadius.circular(screenWidth * 0.02),
                               child: SizedBox(
                                 height: screenWidth * 0.3,
                                 child: AspectRatio(
@@ -1044,7 +1130,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                                   child: Image.network(
                                     token.distributionImage!,
                                     fit: BoxFit.contain,
-
                                   ),
                                 ),
                               ),
@@ -1055,12 +1140,12 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                       SizedBox(height: screenHeight * 0.015),
                       Container(
                         width: screenWidth,
-                        decoration:const BoxDecoration(
-                          image:  DecorationImage(
-                            image: AssetImage('assets/images/progressFrameBg.png'),
+                        decoration: const BoxDecoration(
+                          image: DecorationImage(
+                            image:
+                                AssetImage('assets/images/progressFrameBg.png'),
                             fit: BoxFit.fill,
                             filterQuality: FilterQuality.medium,
-
                           ),
                         ),
                         child: Padding(
@@ -1072,13 +1157,15 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
                             crossAxisAlignment: CrossAxisAlignment.center,
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: token.distributions.map((dist) {
-                              final percent = double.tryParse(dist.value) ?? 0.0;
+                              final percent =
+                                  double.tryParse(dist.value) ?? 0.0;
                               return Column(
                                 children: [
                                   buildProgressBarRow(
                                     title: dist.title,
                                     percent: percent / 100,
-                                    percentText: "${percent.toStringAsFixed(0)}%",
+                                    percentText:
+                                        "${percent.toStringAsFixed(0)}%",
                                     barColor: _getBarColor(dist.title),
                                     textScale: textScale,
                                     screenHeight: screenHeight,
@@ -1100,8 +1187,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
         ],
       ),
     );
-
-
   }
 
   Widget buildProgressBarRow({
@@ -1149,7 +1234,6 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
               image: AssetImage('assets/images/progressFrameBg.png'),
               fit: BoxFit.cover,
               filterQuality: FilterQuality.medium,
-
             ),
           ),
           child: ClipRRect(
@@ -1165,12 +1249,7 @@ class _ViewTokenScreenState extends State<ViewTokenScreen>with WidgetsBindingObs
       ],
     );
   }
-
-
-
-
 }
-
 
 Color _getBarColor(String title) {
   switch (title.toLowerCase()) {
@@ -1184,5 +1263,3 @@ Color _getBarColor(String title) {
       return Colors.blueAccent;
   }
 }
-
-

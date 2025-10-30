@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 
@@ -22,7 +23,7 @@ class ListingField extends StatefulWidget {
   final List<String>? dropdownItems;
   final String? selectedDropdownItem;
   final ValueChanged<String?>? onDropdownChanged;
-
+  final List<TextInputFormatter>? inputFormatters;
   const ListingField({
     super.key,
     this.controller,
@@ -42,7 +43,7 @@ class ListingField extends StatefulWidget {
     this.dropdownItems,
     this.selectedDropdownItem,
     this.onDropdownChanged,
-    this.onChanged,
+    this.onChanged, this.inputFormatters,
   });
 
   @override
@@ -124,9 +125,14 @@ class _ListingFieldState extends State<ListingField> {
           // vertical: screenHeight * 0.012,
         ),
         decoration: ShapeDecoration(
-          color: const Color(0XFF101A29),
+          // color: const Color(0XFF101A29),
+          color: widget.readOnly ? Colors.black87.withOpacity(0.9) : const Color(0XFF101A29),
           shape: RoundedRectangleBorder(
-            side: const BorderSide(width: 1.2, color: Color(0xFF141317)),
+            side:  BorderSide(
+                width: 1.2,
+                // color: Color(0xFF141317)
+                color: widget.readOnly ? Colors.white :  Color(0xFF141317)
+            ),
             borderRadius: BorderRadius.circular(responsiveBorderRadius),
           ),
           shadows: const [
@@ -184,6 +190,7 @@ class _ListingFieldState extends State<ListingField> {
                     fontFamily: 'Poppins',
                   ),
                   decoration: const InputDecoration(
+
                     border: InputBorder.none,
                     isCollapsed: true,
                   ),
@@ -210,14 +217,17 @@ class _ListingFieldState extends State<ListingField> {
                             textAlignVertical: TextAlignVertical.top,
                             scrollPhysics: const BouncingScrollPhysics(),
                             scrollController: ScrollController(),
+                            inputFormatters:  widget.inputFormatters ,
                             style: TextStyle(
                               fontFamily: 'Poppins',
                               fontWeight: FontWeight.w400,
                               fontSize: responsiveFontSize,
                               height: 1.6,
-                              color: Colors.white.withOpacity(0.9),
+                              color: widget.readOnly
+                                  ? Colors.white.withOpacity(0.5) : Colors.white.withOpacity(0.9),
                             ),
                               decoration: InputDecoration(
+
                                 contentPadding: EdgeInsets.symmetric(vertical: 11), // key to vertical centering
                                 isDense: true,
                                 isCollapsed: false,
@@ -230,6 +240,7 @@ class _ListingFieldState extends State<ListingField> {
                                   fontWeight: FontWeight.w400,
                                   height: 1.6,
                                 ),
+
                               ),
                             ),
                           ),

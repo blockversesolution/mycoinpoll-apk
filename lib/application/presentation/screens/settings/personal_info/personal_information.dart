@@ -10,10 +10,14 @@ import '../../../../../framework/components/BlockButton.dart';
 import '../../../../../framework/components/ListingFields.dart';
 import '../../../../../framework/utils/customToastMessage.dart';
 import '../../../../../framework/utils/enums/toast_type.dart';
+import '../../../../../main.dart';
 import '../../../../domain/constants/api_constants.dart';
 import '../../../models/user_model.dart';
 import '../../../viewmodel/bottom_nav_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
+import '../../../viewmodel/user_auth_provider.dart';
+import '../../../viewmodel/wallet_view_model.dart';
 
 class PersonalInformationScreen extends StatefulWidget {
   const PersonalInformationScreen({super.key});
@@ -42,6 +46,9 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
   String _originalPhoneNumber = '';
   String _originalAddress = '';
 
+  int? _userId;
+  String? _uniqueId;
+
   @override
   void initState() {
     super.initState();
@@ -65,11 +72,8 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
     emailAddressController.removeListener(_onFieldChanged);
     phoneNumberController.removeListener(_onFieldChanged);
     addressController.removeListener(_onFieldChanged);
-
     Provider.of<PersonalViewModel>(context, listen: false)
         .removeListener(_onImageChanged);
-
-    // Dispose controllers to free up resources
     emailAddressController.dispose();
     firstNameController.dispose();
     userNameController.dispose();
@@ -83,48 +87,34 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
   Future<void> _loadInitialProfileData() async {
     final prefs = await SharedPreferences.getInstance();
     final userJson = prefs.getString('user');
-
+    final authMethod = prefs.getString('auth_method') ?? 'web3';
     if (userJson != null) {
       final user = UserModel.fromJson(jsonDecode(userJson));
-      firstNameController.text = user.name ?? '';
-      userNameController.text = user.username ?? '';
-      emailAddressController.text = user.email ?? '';
-      phoneNumberController.text = user.phone ?? '';
-      addressController.text = user.ethAddress ?? '';
-    } else {
-      firstNameController.text = prefs.getString('firstName') ?? '';
-      userNameController.text = prefs.getString('userName') ?? '';
-      emailAddressController.text = prefs.getString('emailAddress') ?? '';
-      phoneNumberController.text = prefs.getString('phoneNumber') ?? '';
-      addressController.text = prefs.getString('ethAddress') ?? '';
+
+      setState(() {
+        firstNameController.text = user.name ?? '';
+        userNameController.text = user.username ?? '';
+        emailAddressController.text = user.email ?? '';
+        phoneNumberController.text = user.phone ?? '';
+        addressController.text = user.ethAddress ?? '';
+
+        _originalFirstName = firstNameController.text;
+        _originalLastName = userNameController.text;
+        _originalEmailAddress = emailAddressController.text;
+        _originalPhoneNumber = phoneNumberController.text;
+        _originalAddress = addressController.text;
+
+        _userId = user.id;
+        _uniqueId = user.uniqueId;
+        _isProfileUpdated = false;
+       });
     }
 
-    setState(() {
-      _originalFirstName = firstNameController.text;
-      _originalLastName = userNameController.text;
-      _originalEmailAddress = emailAddressController.text;
-      _originalPhoneNumber = phoneNumberController.text;
-      _originalAddress = addressController.text;
-
-      _isProfileUpdated = false;
-    });
   }
 
   void _onFieldChanged() {
-    final profileVM = Provider.of<PersonalViewModel>(context, listen: false);
+    _checkForProfileChanges();
 
-    bool hasChanges = firstNameController.text != _originalFirstName ||
-        userNameController.text != _originalLastName ||
-        emailAddressController.text != _originalEmailAddress ||
-        phoneNumberController.text != _originalPhoneNumber ||
-        addressController.text != _originalAddress ||
-        profileVM.hasImageChanged();
-
-    if (hasChanges != _isProfileUpdated) {
-      setState(() {
-        _isProfileUpdated = hasChanges;
-      });
-    }
   }
 
   void _onImageChanged() {
@@ -164,16 +154,9 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
       _isLoading = true;
     });
 
-    final updatedProfile = {
-      "name": firstNameController.text.trim(),
-      "username": userNameController.text.trim(),
-      "email": emailAddressController.text.trim(),
-      "phone": phoneNumberController.text.trim(),
-      "eth_address": addressController.text.trim(),
-    };
+
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
-
     if (token == null) {
       print(">>> No token found in SharedPreferences");
       ToastMessage.show(
@@ -190,8 +173,27 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
     }
 
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/update-profile');
+      final updatedProfile = {
+        "name": firstNameController.text.trim(),
+        "username": userNameController.text.trim(),
+        "email": emailAddressController.text.trim(),
+        "phone": phoneNumberController.text.trim(),
+        "eth_address": addressController.text.trim(),
+      };
 
+
+      final profileVm = Provider.of<PersonalViewModel>(context, listen: false);
+      String? imageUrl;
+      
+      if(profileVm.hasImageChanged() && profileVm.pickedImage != null){
+        await profileVm.saveImageToPrefs();
+        imageUrl = profileVm.pickedImage?.path ?? '';
+      }else{
+        imageUrl = profileVm.originalImagePath ?? '';
+      }
+
+
+      final uri = Uri.parse('${ApiConstants.baseUrl}/update-profile');
       final response = await http.post(
         uri,
         headers: {
@@ -199,14 +201,42 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
           'Accept': 'application/json',
           if (token != null) 'Authorization': 'Bearer $token',
         },
-        body: jsonEncode(updatedProfile),
+        body: jsonEncode({
+          ...updatedProfile,
+          'image': imageUrl,
+        }),
       );
-
-      print(">>> Token: $token");
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
 
+        final updatedUser = UserModel(
+          id: _userId ?? 0,
+          name: updatedProfile['name'] ?? '',
+          username: updatedProfile['username'] ?? '',
+          email: updatedProfile['email'] ?? '',
+          phone: updatedProfile['phone'] ?? '',
+          ethAddress: updatedProfile['eth_address'] ?? '',
+          image:  imageUrl,
+          uniqueId: _uniqueId ?? const Uuid().v4(),
+        );
+
+        await prefs.setString('user', jsonEncode(updatedUser.toJson()));
+        await prefs.setString('firstName', updatedProfile['name'] ?? '');
+        await prefs.setString('userName', updatedProfile['username'] ?? '');
+        await prefs.setString('emailAddress', updatedProfile['email'] ?? '');
+        await prefs.setString('phoneNumber', updatedProfile['phone'] ?? '');
+        await prefs.setString('ethAddress', updatedProfile['eth_address'] ?? '');
+
+
+        final userAuthProvider = Provider.of<UserAuthProvider>(context, listen: false);
+        userAuthProvider.setUser(updatedUser);
+
+        final bottomNavProvider = Provider.of<BottomNavProvider>(context, listen: false);
+        bottomNavProvider.setFullName(updatedProfile['name'] ?? '');
+        profileVm.resetImageChange();
+
+        // Update original values
         setState(() {
           _originalFirstName = updatedProfile['name'] ?? '';
           _originalLastName = updatedProfile['username'] ?? '';
@@ -214,20 +244,20 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
           _originalPhoneNumber = updatedProfile['phone'] ?? '';
           _originalAddress = updatedProfile['eth_address'] ?? '';
           _isProfileUpdated = false;
+          _isLoading = false;
         });
-
-        await prefs.setString('firstName', updatedProfile['name'] ?? '');
-        await prefs.setString('userName', updatedProfile['username'] ?? '');
-        await prefs.setString('emailAddress', updatedProfile['email'] ?? '');
-        await prefs.setString('phoneNumber', updatedProfile['phone'] ?? '');
-        await prefs.setString(
-            'ethAddress', updatedProfile['eth_address'] ?? '');
-
-        Provider.of<BottomNavProvider>(context, listen: false)
-            .setFullName("${updatedProfile['name'] ?? ''}".trim());
 
         print(">> Profile update successful:");
         print(">>Profile Updated : $responseData");
+
+        await updateLogRocketUser(
+          prefs.getString('unique_id') ?? const Uuid().v4(),
+          updatedProfile['eth_address'] ?? 'unknown',
+          updatedProfile['username'] ?? 'unknown',
+        );
+
+
+
         ToastMessage.show(
           message: "Profile Updated",
           subtitle: "Your changes have been saved successfully.",
@@ -235,6 +265,7 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
           duration: CustomToastLength.LONG,
           gravity: CustomToastGravity.BOTTOM,
         );
+
       } else {
         print(">> Failed response: ${response.statusCode}");
         print(">> Response body: ${response.body}");
@@ -257,6 +288,8 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
       });
     }
   }
+  
+  
 
   Future<void> validateAndUpdatePassword() async {
     String newPass = newPasswordController.text.trim();
@@ -337,9 +370,8 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
+    final walletVm = Provider.of<WalletViewModel>(context, listen: false);
 
-    final isPortrait = screenHeight > screenWidth;
-    final baseSize = isPortrait ? screenWidth : screenHeight;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -469,9 +501,8 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
                                             height: screenHeight * 0.05,
                                             expandable: false,
                                             keyboard: TextInputType.name,
-                                            onChanged: (value) =>
-                                                _onFieldChanged(),
-                                          ),
+                                            onChanged: (value) => _onFieldChanged(),
+                                           ),
                                         ),
                                       ],
                                     ),
@@ -487,18 +518,18 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
                                       expandable: false,
                                       keyboard: TextInputType.name,
                                       onChanged: (value) => _onFieldChanged(),
-                                    ),
+                                     ),
 
                                     SizedBox(height: screenHeight * 0.02),
 
                                     ListingField(
                                       controller: phoneNumberController,
-                                      labelText: 'Contract Number',
+                                      labelText: 'Contact Number',
                                       height: screenHeight * 0.05,
                                       expandable: false,
                                       keyboard: TextInputType.number,
                                       onChanged: (value) => _onFieldChanged(),
-                                    ),
+                                     ),
 
                                     SizedBox(height: screenHeight * 0.02),
 
@@ -511,7 +542,8 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
                                       expandable: false,
                                       keyboard: TextInputType.emailAddress,
                                       onChanged: (value) => _onFieldChanged(),
-                                    ),
+                                      readOnly: true,
+                                     ),
 
                                     SizedBox(height: screenHeight * 0.05),
 
@@ -553,7 +585,8 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
 
                                     SizedBox(height: screenHeight * 0.05),
 
-                                    Align(
+
+                                      Align(
                                       alignment: Alignment.topLeft,
                                       child: Text(
                                         'Update Your Password',
@@ -568,46 +601,48 @@ class _PersonalInformationScreenState extends State<PersonalInformationScreen> {
                                         ),
                                       ),
                                     ),
+                                      SizedBox(height: screenHeight * 0.03),
 
-                                    SizedBox(height: screenHeight * 0.03),
-
-                                    SizedBox(height: screenHeight * 0.02),
-                                    ListingField(
-                                      controller: newPasswordController,
-                                      labelText: 'New Password',
-                                      height: screenHeight * 0.05,
-                                      expandable: false,
-                                      keyboard: TextInputType.name,
-                                    ),
-
-                                    SizedBox(height: screenHeight * 0.02),
-
-                                    ListingField(
-                                      controller: confirmPasswordController,
-                                      labelText: 'Confirm Password',
-                                      height: screenHeight * 0.05,
-                                      expandable: false,
-                                      keyboard: TextInputType.name,
-                                    ),
-
-                                    SizedBox(height: screenHeight * 0.05),
-
-                                    BlockButton(
-                                      height: screenHeight * 0.045,
-                                      width: screenWidth * 0.7,
-                                      label: 'Update Password',
-                                      textStyle: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
-                                        fontSize:
-                                            getResponsiveFontSize(context, 16),
+                                      SizedBox(height: screenHeight * 0.02),
+                                      ListingField(
+                                        controller: newPasswordController,
+                                        labelText: 'New Password',
+                                        height: screenHeight * 0.05,
+                                        expandable: false,
+                                        keyboard: TextInputType.name,
                                       ),
-                                      gradientColors: const [
-                                        Color(0xFF2680EF),
-                                        Color(0xFF1CD494),
-                                      ],
-                                      onTap: () => validateAndUpdatePassword(),
-                                    ),
+
+                                      SizedBox(height: screenHeight * 0.02),
+
+                                      ListingField(
+                                        controller: confirmPasswordController,
+                                        labelText: 'Confirm Password',
+                                        height: screenHeight * 0.05,
+                                        expandable: false,
+                                        keyboard: TextInputType.name,
+                                      ),
+
+                                      SizedBox(height: screenHeight * 0.05),
+
+                                      BlockButton(
+                                        height: screenHeight * 0.045,
+                                        width: screenWidth * 0.7,
+                                        label: 'Update Password',
+                                        textStyle: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                          fontSize:
+                                          getResponsiveFontSize(context, 16),
+                                        ),
+                                        gradientColors: const [
+                                          Color(0xFF2680EF),
+                                          Color(0xFF1CD494),
+                                        ],
+                                        onTap: () => validateAndUpdatePassword(),
+                                      ),
+
+
+
                                   ],
                                 ),
                               ),

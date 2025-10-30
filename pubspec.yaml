@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 1.0.3+6
 
 environment:
   sdk: ^3.5.3
@@ -40,13 +40,14 @@ dependencies:
   reown_appkit: ^1.6.0
   reown_walletkit: ^1.3.0
   provider:
+  convert: ^3.1.1
   web3dart: ^2.6.1
   flutter_html: ^3.0.0
   http:
   shared_preferences:
   url_launcher: ^6.2.5
   path_provider: ^2.1.2
-  device_info_plus: ^10.1.0
+  device_info_plus: ^12.1.0
   flutter_svg: ^2.0.7
   xml: ^6.1.0
   share_plus:
@@ -57,12 +58,17 @@ dependencies:
   file_selector: ^1.0.3
   youtube_player_flutter: ^9.1.1
   open_file: ^3.2.1
-  decimal: ^2.3.3
+  decimal: ^3.2.4
   dio: ^5.4.0
-  android_intent_plus: ^4.0.3
+  android_intent_plus: ^6.0.0
 
-  permission_handler: ^11.3.0
+  permission_handler: ^12.0.1
+  connectivity_plus: ^6.1.5
+  get: ^4.6.5
 
+  logrocket_flutter: ^1.56.2
+  firebase_core: ^4.1.1
+  firebase_analytics: ^12.0.2
 
 
 
@@ -110,6 +116,7 @@ flutter:
     - assets/abi/ECMContractABI.json
     - assets/abi/AggregatorABI.json
     - assets/abi/VestingABI.json
+    - assets/abi/ExitingVestingABI.json
     - assets/images/tokens.png
     - assets/images/frame.png
     - assets/icons/copyImg.svg

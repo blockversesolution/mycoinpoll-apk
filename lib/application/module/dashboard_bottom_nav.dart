@@ -9,6 +9,7 @@ import 'package:mycoinpoll_metamask/application/module/userDashboard/view/vestin
 import 'package:provider/provider.dart';
 import '../presentation/screens/settings/settings_screen.dart';
 import '../presentation/viewmodel/wallet_view_model.dart';
+import 'userDashboard/view/transactions/transaction_screen.dart';
 
 class DashboardBottomNavBar extends StatefulWidget {
   const DashboardBottomNavBar({super.key});
@@ -21,20 +22,22 @@ class _DashboardBottomNavBarState extends State<DashboardBottomNavBar> {
     const DashboardScreen(),
     const ECMIcoScreen(),
     const StakingScreen(),
-    const VestingWrapper(),
-
+    // const VestingWrapper(),
+    const TransactionScreen(),
     const ProfileScreen(),
   ];
 
-  final List<String> _labels = ['Dashboard', 'ECM ICO', 'Staking', 'Vesting', 'Settings'];
+  final List<String> _labels = ['Dashboard', 'ECM ICO', 'Staking', 'Transaction', 'Settings'];
 
   final List<String> _imgPaths = [
     'assets/icons/dasboard.svg',
     'assets/icons/ico.svg',
     'assets/icons/staking.svg',
-    'assets/icons/vesting.svg',
+    // 'assets/icons/vesting.svg',
+    'assets/icons/transaction.svg',
     'assets/icons/profileIcon.svg',
   ];
+
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -99,19 +102,19 @@ class _DashboardBottomNavBarState extends State<DashboardBottomNavBar> {
                         onTap: () async {
                           navProvider.setIndex(index);
 
-                          if (index == 3) {
-                            // walletVM.getVestingInformation();
-
-                            // Vesting tab logic
-                            if (walletVM.walletAddress == null || walletVM.walletAddress!.isEmpty) {
-                             await walletVM.ensureModalWithValidContext(context);
-                             await walletVM.rehydrate();
-
-                             await walletVM.appKitModal?.openModalView();
-                            }
-
-
-                          }
+                          // if (index == 3) {
+                          //   // walletVM.getVestingInformation();
+                          //
+                          //
+                          //   if (walletVM.walletAddress == null || walletVM.walletAddress!.isEmpty) {
+                          //    await walletVM.ensureModalWithValidContext(context);
+                          //    await walletVM.rehydrate();
+                          //
+                          //     //  await walletVM.appKitModal?.openModalView();
+                          //    if (!mounted) return;
+                          //    await context.read<WalletViewModel>().openWalletModal(context);
+                          //   }
+                          // }
                         },
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -154,4 +157,6 @@ class _DashboardBottomNavBarState extends State<DashboardBottomNavBar> {
 
 
 }
+
+
 

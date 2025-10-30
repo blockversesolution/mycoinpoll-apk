@@ -11,6 +11,7 @@ import '../../../../../framework/components/ListingFields.dart';
 import '../../../../../framework/components/buy_Ecm.dart';
 import '../../../../../framework/components/percentageSelectorComponent.dart';
 import '../../../../../framework/components/searchControllerComponent.dart';
+import '../../../../../framework/utils/decimalFormat.dart';
 import '../../../../../framework/utils/enums/sort_option.dart';
 import '../../../../domain/constants/api_constants.dart';
 import '../../../../domain/usecases/sort_data.dart';
@@ -686,17 +687,30 @@ class _StakingScreenState extends State<StakingScreen> {
                       children: [
 
                         Consumer<WalletViewModel>(builder: (context, model, child){
-                          return Text(
-                            // 'Max: 5000',
-                            'Max: ${model.maximumStake ?? '...'} ECM',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              fontFamily: 'Poppins',
-                            ),
-                          );
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Min: ${model.minimumStake ?? '...'}',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                              Text(
+                                'Max: ${model.maximumStake ?? '...'}',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
 
+                            ],
+                          );
                         }
                         ),
 
@@ -705,6 +719,7 @@ class _StakingScreenState extends State<StakingScreen> {
                         ListingField(
                           labelText: 'Input Amounts',
                           controller: ecmAmountController,
+                          keyboard: TextInputType.number,
                           height: listingFieldHeight,
                           onChanged: (value) {
                             setState(() {
@@ -713,6 +728,7 @@ class _StakingScreenState extends State<StakingScreen> {
                           },
                           width: double.infinity,
                           prefixPngPath: 'assets/images/ecm.png',
+                          inputFormatters: [DecimalTextInputFormatter(),],
                         ),
                       ],
                     ),
