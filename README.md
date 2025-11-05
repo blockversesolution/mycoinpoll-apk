@@ -172,6 +172,49 @@ Contents
 - lib/generated/
 - lib/logrocket/
 
+---
+## CORE FEATURES 
+The app implements the following major features. Below each features is a short not about where related code is typically located inside `lib/` so developers know where to start.
+
+1) Wallet Connection
+   - Functionality: Detect / connect user wallet, prompt for connection , manage provider lifecycle , sign transaction.
+
+2) Purchase ECM with ICO
+   - Functionality: Initiate purchase transactions for ECM token during ICO period. validate amounts , show pending/receipt state using the User's Wallet.
+
+3) ICO Vesting
+   - Functionality: Schedule/track vesting allocations from ICO purchases (Claim windows, Vested Amount, Next unlock).
+
+4) Existing User Vesting
+   - Functionality: handle Vesting for users who perticipated previously (Migrations, claim History). 
+
+5) ECM Staking
+   - Functionality: Lock ECM tokens for rewards (stake/unstake, view rewards, compounding).
+
+6) Wallet Transaction History
+   - Functionality: Present on-chain/off-chain transaction list for a connected wallet (filter, details).
+  
+7) Referral status and History
+   - Functionality: Show referral eligibility / status, accumulated referral rewards, and referral interactions history.
+
+8) Apply for Listing
+   - Functionality: Form + submission flow for token listing request (fields, attachments, status tracking).
+     
+9) Apply for Listing
+   - Functionality: Token details page (Supply, Contract Address, White papaer) and project roadmap timeline.
+
+10) News Section
+    - Functionality: News feed (Articles, Annoucements etc).
+
+11) Ecm Purchase History View
+    - Functionality: Show historical ECM purchases for a user, with filters and receipts.
+
+12) Feedback Screen
+    - Functionality: In-app Feedback Submission (Text/ Screenshots), send to backend or analytics.
+     
+13) Androverse (Comming Soon)
+
+---
 Guiding Principles 
 - Keep UI (Presentation) seperate from business/domain logic and data access .
 - Use the framework/ area for reusable widgets, styles , assets, and utility helpers used across the app.
