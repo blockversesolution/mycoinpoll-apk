@@ -81,11 +81,6 @@ Run on a specific device:
 flutter run -d <device-id>
 ```
 
-Run for web:
-```bash
-flutter run -d chrome
-```
-
 For flavors/alternate entrypoints:
 ```bash
 flutter run --flavor staging -t lib/main_staging.dart
