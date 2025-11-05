@@ -43,8 +43,8 @@ flutter doctor
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/devhimuBlockVerse/myCoinPollMetaMask.git
-cd myCoinPollMetaMask
+git clone https://github.com/blockversesolution/mycoinpoll-apk.git
+cd mycoinpoll-apk
 ```
 
 2. Checkout the main branch (or the branch your team uses):
